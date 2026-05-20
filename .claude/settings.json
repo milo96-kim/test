@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "html-builder",
+        "type": "agent",
+        "agent": ".claude/agents/test-runner.md"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/stop-test-and-commit.ps1"
+      }
+    ]
+  }
+}

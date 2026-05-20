@@ -1,0 +1,317 @@
+# Codex shell-command approval rules for this workspace.
+# Current environment: Windows NT 10.0.26200.0 with PowerShell 5.1.
+# This file controls shell-command approvals only.
+# Filesystem write scope is still enforced by `.codex/config.toml` via `sandbox_mode = "workspace-write"`.
+# Rule precedence is strictest-first: `forbidden` > `prompt` > `allow`.
+#
+# Design notes:
+# - Allow common read/search/test/build commands that stay inside the workspace.
+# - Prompt for commands that can mutate state, reach the network, or hide complex shell behavior.
+# - Forbid clearly dangerous commands and obvious secret-file access attempts.
+# - Prefix rules only inspect the command prefix, so some path-sensitive cases are intentionally handled by
+#   the sandbox and by conservative prompt rules instead of trying to infer full path intent here.
+
+# Read-only workspace inspection on POSIX-style tools.
+prefix_rule(
+    pattern = [["ls", "pwd", "cat", "head", "tail", "rg", "grep", "find"]],
+    decision = "allow",
+    justification = "Read-only workspace inspection stays within the project and is safe to run automatically.",
+    match = [
+        "ls",
+        "pwd",
+        "cat AGENTS.md",
+        "head index.html",
+        "tail index.html",
+        "rg TODO",
+        "grep TODO",
+        "find .",
+    ],
+)
+
+# Read-only workspace inspection on PowerShell tools.
+prefix_rule(
+    pattern = [["Get-ChildItem", "Get-Location", "Get-Content", "Select-String"]],
+    decision = "allow",
+    justification = "PowerShell read/search commands are needed for normal workspace inspection and are safe to auto allow.",
+    match = [
+        "Get-ChildItem -Force",
+        "Get-Location",
+        "Get-Content AGENTS.md",
+        "Select-String -Pattern TODO -Path index.html",
+    ],
+)
+
+# Git queries that only inspect repository state.
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log"]],
+    decision = "allow",
+    justification = "Git status, diff, and log are read-only queries that should run without prompting.",
+    match = [
+        "git status",
+        "git diff",
+        "git log --oneline",
+    ],
+)
+
+# Python execution and test runs.
+prefix_rule(
+    pattern = ["python"],
+    decision = "allow",
+    justification = "Python execution and test runners are allowed so workspace checks can run without friction.",
+    match = [
+        "python",
+        "python script.py",
+        "python -m pytest",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pytest"],
+    decision = "allow",
+    justification = "Direct pytest invocations are normal test commands and should be allowed automatically.",
+    match = [
+        "pytest",
+        "pytest -q",
+    ],
+)
+
+prefix_rule(
+    pattern = ["python", "-m", "pytest"],
+    decision = "allow",
+    justification = "The test runner entry point `python -m pytest` is safe to auto allow in this workspace.",
+    match = [
+        "python -m pytest",
+        "python -m pytest -q",
+    ],
+)
+
+# Node package test and build entry points.
+prefix_rule(
+    pattern = ["npm", "test"],
+    decision = "allow",
+    justification = "Project test scripts should run automatically when they stay within the workspace.",
+    match = [
+        "npm test",
+        "npm test -- --watch=false",
+    ],
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "lint"],
+    decision = "allow",
+    justification = "Linting is a local verification step and should not require approval.",
+    match = [
+        "npm run lint",
+        "npm run lint -- --fix",
+    ],
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "build"],
+    decision = "allow",
+    justification = "Local builds are part of normal verification and should run automatically.",
+    match = [
+        "npm run build",
+        "npm run build -- --mode production",
+    ],
+)
+
+# Safe file and folder creation helpers.
+prefix_rule(
+    pattern = [["mkdir", "touch", "New-Item"]],
+    decision = "allow",
+    justification = "Creating workspace files and folders is safe when sandbox write scope already limits where writes can happen.",
+    match = [
+        "mkdir .codex\\rules",
+        "touch .codex/rules/default.rules",
+        "New-Item -ItemType File .codex\\rules\\default.rules",
+    ],
+)
+
+# Safe patch/application helpers.
+prefix_rule(
+    pattern = ["apply_patch"],
+    decision = "allow",
+    justification = "Applying a reviewed patch is a normal, scoped edit operation in this workspace.",
+    match = [
+        "apply_patch",
+        "apply_patch --help",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "apply"],
+    decision = "allow",
+    justification = "Applying a patch with git apply is a scoped file-edit operation and is safe to auto allow.",
+    match = [
+        "git apply patch.diff",
+        "git apply --check patch.diff",
+    ],
+)
+
+prefix_rule(
+    pattern = ["patch"],
+    decision = "allow",
+    justification = "The patch utility is allowed for controlled, local edits.",
+    match = [
+        "patch -p1 < fix.patch",
+    ],
+)
+
+# Commands that can mutate repository state but are not automatically safe.
+prefix_rule(
+    pattern = ["git", ["commit", "reset", "clean"]],
+    decision = "prompt",
+    justification = "Git commit, reset, and clean can rewrite history or delete tracked files, so they need confirmation.",
+    match = [
+        "git commit -m test",
+        "git reset --hard HEAD~1",
+        "git clean -fd",
+    ],
+)
+
+prefix_rule(
+    pattern = [["Set-Content", "Add-Content", "Out-File", "Copy-Item", "Move-Item", "Rename-Item", "Remove-Item"]],
+    decision = "prompt",
+    justification = "Direct PowerShell file mutation and deletion commands should be confirmed before they run.",
+    match = [
+        "Set-Content notes.txt hello",
+        "Add-Content notes.txt hello",
+        "Out-File notes.txt",
+        "Copy-Item a.txt b.txt",
+        "Move-Item a.txt b.txt",
+        "Rename-Item a.txt b.txt",
+        "Remove-Item temp.txt",
+    ],
+)
+
+prefix_rule(
+    pattern = [["pip", "npm"], ["install"]],
+    decision = "prompt",
+    justification = "Dependency installs can fetch from the network and modify the environment, so they should be approved first.",
+    match = [
+        "pip install requests",
+        "npm install",
+    ],
+)
+
+prefix_rule(
+    pattern = ["python", "-m", "pip", "install"],
+    decision = "prompt",
+    justification = "Python package installation can reach the network and change the environment, so it should be confirmed.",
+    match = [
+        "python -m pip install requests",
+        "python -m pip install -r requirements.txt",
+    ],
+)
+
+prefix_rule(
+    pattern = [["curl", "wget", "Invoke-WebRequest", "iwr", "irm", "Start-BitsTransfer"]],
+    decision = "prompt",
+    justification = "Network-capable download commands should be reviewed before they are allowed to run.",
+    match = [
+        "curl https://example.com",
+        "wget https://example.com",
+        "Invoke-WebRequest https://example.com",
+    ],
+)
+
+prefix_rule(
+    pattern = [["bash", "sh", "zsh", "powershell", "pwsh", "cmd"]],
+    decision = "prompt",
+    justification = "Shell wrappers can hide compound or redirected commands, so they should be reviewed instead of auto allowed.",
+    match = [
+        "bash -lc ls",
+        "powershell -Command Get-ChildItem",
+        "pwsh -Command Get-Location",
+        "cmd /c dir",
+    ],
+)
+
+# Clearly destructive operations are blocked outright.
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "forbidden",
+    justification = "Do not push from Codex. If you need to publish changes, use a reviewed local commit and push manually.",
+    match = [
+        "git push",
+        "git push origin main",
+    ],
+)
+
+prefix_rule(
+    pattern = ["rm", "-rf"],
+    decision = "forbidden",
+    justification = "Recursive force deletion is dangerous. Use scoped, reviewed deletions instead of `rm -rf`.",
+    match = [
+        "rm -rf data",
+        "rm -rf .",
+    ],
+)
+
+prefix_rule(
+    pattern = ["Remove-Item", "-Recurse", "-Force"],
+    decision = "forbidden",
+    justification = "Recursive forced deletion is dangerous. Use a narrower deletion command with confirmation instead.",
+    match = [
+        "Remove-Item -Recurse -Force data",
+        "Remove-Item -Recurse -Force C:\\temp",
+    ],
+)
+
+# Obvious secret-file reads and writes are blocked.
+prefix_rule(
+    pattern = [["cat", "head", "tail", "Get-Content"], [".env", ".env.local", ".env.development", ".env.production", ".env.test", "secrets.json", "secret.json", "credentials.json", ".npmrc", "id_rsa", "id_ed25519", "private.key", "api_key.txt", "apikey.txt"]],
+    decision = "forbidden",
+    justification = "Do not print or inspect secret, credential, or API key files. Keep secrets out of shell output.",
+    match = [
+        "cat .env",
+        "head .env.local",
+        "tail credentials.json",
+        "Get-Content .env",
+    ],
+)
+
+prefix_rule(
+    pattern = ["Get-Content", "-Path", [".env", ".env.local", ".env.development", ".env.production", ".env.test", "secrets.json", "secret.json", "credentials.json", ".npmrc", "id_rsa", "id_ed25519", "private.key", "api_key.txt", "apikey.txt"]],
+    decision = "forbidden",
+    justification = "Do not read secret, credential, or API key files through PowerShell path arguments.",
+    match = [
+        "Get-Content -Path .env",
+        "Get-Content -Path credentials.json",
+    ],
+)
+
+prefix_rule(
+    pattern = ["Select-String", "-Path", [".env", ".env.local", ".env.development", ".env.production", ".env.test", "secrets.json", "secret.json", "credentials.json", ".npmrc", "id_rsa", "id_ed25519", "private.key", "api_key.txt", "apikey.txt"]],
+    decision = "forbidden",
+    justification = "Do not search through secret, credential, or API key files with PowerShell path arguments.",
+    match = [
+        "Select-String -Path .env -Pattern token",
+        "Select-String -Path credentials.json -Pattern key",
+    ],
+)
+
+prefix_rule(
+    pattern = [["Set-Content", "Add-Content", "Out-File"], [".env", ".env.local", ".env.development", ".env.production", ".env.test", "secrets.json", "secret.json", "credentials.json", ".npmrc", "id_rsa", "id_ed25519", "private.key", "api_key.txt", "apikey.txt"]],
+    decision = "forbidden",
+    justification = "Do not write or overwrite secret, credential, or API key files from the shell.",
+    match = [
+        "Set-Content .env value",
+        "Out-File credentials.json",
+        "Add-Content api_key.txt value",
+    ],
+)
+
+# System and machine configuration changes should not be automated.
+prefix_rule(
+    pattern = [["Set-ExecutionPolicy", "Set-ItemProperty", "New-ItemProperty", "reg", "netsh", "bcdedit", "dism"]],
+    decision = "forbidden",
+    justification = "System configuration and registry/network changes should be blocked instead of auto executed.",
+    match = [
+        "Set-ExecutionPolicy RemoteSigned",
+        "reg add",
+        "netsh interface show interface",
+    ],
+)
+
